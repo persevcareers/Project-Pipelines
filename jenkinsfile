@@ -1,38 +1,42 @@
 pipeline {
     agent any
 
-    environment {
-        KUBE_CONFIG_FILE = credentials('kube-config-prod')
-        KUBE_NAMESPACE = 'prod-env'
-        DEPLOYMENT_NAME = ''
-        IMAGE_NAME = ''
-        IMAGE_TAG = '<image_tag>'
+    parameters {
+        string(name: 'DOCKER_IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag')
     }
 
     stages {
-        stage('Deploy') {
+        stage('Checkout') {
             steps {
-                // Authenticate with Kubernetes cluster
-                script {
-                    sh "cp ${KUBE_CONFIG_FILE} kubeconfig.yaml"
-                    env.KUBECONFIG = 'kubeconfig.yaml'
-                }
+                checkout scm
+            }
+        }
 
-                // Set kubectl namespace
+        stage('Build and Push Docker Image') {
+            steps {
                 script {
-                    sh "kubectl config set-context --current --namespace=${KUBE_NAMESPACE}"
-                }
-
-                // Apply Kubernetes deployment
-                script {
-                    sh "kubectl apply -f deployment.yaml"
-                }
-
-                // Wait for deployment rollout
-                script {
-                    sh "kubectl rollout status deployment/${DEPLOYMENT_NAME}"
+                    def dockerImageTag = "nasi101/netflix:${params.DOCKER_IMAGE_TAG}"
+                    docker.build(dockerImageTag).push()
                 }
             }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    def kubeManifest = readFile('your-kubernetes-manifest.yaml').replaceAll('\\$\\{DOCKER_IMAGE\\}', "nasi101/netflix:${params.DOCKER_IMAGE_TAG}")
+                    writeFile file: 'deployed-manifest.yaml', text: kubeManifest
+                    withCredentials([string(credentialsId: 'your-kubeconfig-credential-id', variable: 'KUBECONFIG')]) {
+                        sh "kubectl apply -f deployed-manifest.yaml --kubeconfig=\$KUBECONFIG"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Cleanup steps if necessary
         }
     }
 }
